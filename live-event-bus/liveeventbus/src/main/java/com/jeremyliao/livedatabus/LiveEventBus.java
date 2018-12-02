@@ -2,10 +2,10 @@ package com.jeremyliao.livedatabus;
 
 import android.arch.lifecycle.Lifecycle;
 import android.arch.lifecycle.LifecycleOwner;
-import android.arch.lifecycle.Observer;
 import android.support.annotation.NonNull;
 
 import com.jeremyliao.livedatabus.liveevent.LiveEvent;
+import com.jeremyliao.livedatabus.liveevent.LiveEventObserver;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -14,19 +14,15 @@ import java.util.Map;
  * Created by hailiangliao on 2018/7/4.
  */
 
-public final class LiveDataBus {
+public final class LiveEventBus {
 
     private final Map<String, BusLiveEvent<Object>> bus;
 
-    private LiveDataBus() {
+    private LiveEventBus() {
         bus = new HashMap<>();
     }
 
-    private static class SingletonHolder {
-        private static final LiveDataBus DEFAULT_BUS = new LiveDataBus();
-    }
-
-    public static LiveDataBus get() {
+    public static LiveEventBus get() {
         return SingletonHolder.DEFAULT_BUS;
     }
 
@@ -46,15 +42,27 @@ public final class LiveDataBus {
 
         void postValue(T value);
 
-        void observe(@NonNull LifecycleOwner owner, @NonNull Observer<T> observer);
+        void observe(@NonNull LifecycleOwner owner, @NonNull LiveEventObserver<T> observer);
 
-        void observeSticky(@NonNull LifecycleOwner owner, @NonNull Observer<T> observer);
+        void observe(@NonNull LifecycleOwner owner, @NonNull LiveEventObserver<T> observer, int priority);
 
-        void observeForever(@NonNull Observer<T> observer);
+        void observeSticky(@NonNull LifecycleOwner owner, @NonNull LiveEventObserver<T> observer);
 
-        void observeStickyForever(@NonNull Observer<T> observer);
+        void observeSticky(@NonNull LifecycleOwner owner, @NonNull LiveEventObserver<T> observer, int priority);
 
-        void removeObserver(@NonNull Observer<T> observer);
+        void observeForever(@NonNull LiveEventObserver<T> observer);
+
+        void observeForever(@NonNull LiveEventObserver<T> observer, int priority);
+
+        void observeStickyForever(@NonNull LiveEventObserver<T> observer);
+
+        void observeStickyForever(@NonNull LiveEventObserver<T> observer, int priority);
+
+        void removeObserver(@NonNull LiveEventObserver<T> observer);
+    }
+
+    private static class SingletonHolder {
+        private static final LiveEventBus DEFAULT_BUS = new LiveEventBus();
     }
 
     private static class BusLiveEvent<T> extends LiveEvent<T> implements Observable<T> {
@@ -63,5 +71,7 @@ public final class LiveDataBus {
             return super.observerActiveLevel();
 //            return Lifecycle.State.STARTED;
         }
+
+
     }
 }

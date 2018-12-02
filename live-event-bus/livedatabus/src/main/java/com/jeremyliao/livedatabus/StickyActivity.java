@@ -1,19 +1,21 @@
 package com.jeremyliao.livedatabus;
 
-import android.arch.lifecycle.Observer;
 import android.databinding.DataBindingUtil;
 import android.os.Bundle;
 import android.support.annotation.Nullable;
 import android.support.v7.app.AppCompatActivity;
+
 import com.jeremyliao.livedatabus.databinding.ActivityStickyDemoBinding;
+import com.jeremyliao.livedatabus.liveevent.LiveEventObserver;
 
 public class StickyActivity extends AppCompatActivity {
 
     private ActivityStickyDemoBinding binding;
-    private Observer<String> observer = new Observer<String>() {
+    private LiveEventObserver<String> observer = new LiveEventObserver<String>() {
         @Override
-        public void onChanged(@Nullable String s) {
+        public boolean onChanged(@Nullable String s) {
             binding.tvSticky2.setText("observeStickyForever注册的观察者收到消息: " + s);
+            return false;
         }
     };
 
@@ -22,15 +24,16 @@ public class StickyActivity extends AppCompatActivity {
         super.onCreate(savedInstanceState);
         binding = DataBindingUtil.setContentView(this, R.layout.activity_sticky_demo);
         binding.setLifecycleOwner(this);
-        LiveDataBus.get()
+        LiveEventBus.get()
                 .with("sticky_key", String.class)
-                .observeSticky(this, new Observer<String>() {
+                .observeSticky(this, new LiveEventObserver<String>() {
                     @Override
-                    public void onChanged(@Nullable String s) {
+                    public boolean onChanged(@Nullable String s) {
                         binding.tvSticky1.setText("observeSticky注册的观察者收到消息: " + s);
+                        return false;
                     }
                 });
-        LiveDataBus.get()
+        LiveEventBus.get()
                 .with("sticky_key", String.class)
                 .observeStickyForever(observer);
     }
@@ -38,7 +41,7 @@ public class StickyActivity extends AppCompatActivity {
     @Override
     protected void onDestroy() {
         super.onDestroy();
-        LiveDataBus.get()
+        LiveEventBus.get()
                 .with("sticky_key", String.class)
                 .removeObserver(observer);
     }

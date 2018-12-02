@@ -1,6 +1,5 @@
 package com.jeremyliao.livedatabus;
 
-import android.arch.lifecycle.Observer;
 import android.content.Intent;
 import android.databinding.DataBindingUtil;
 import android.os.Bundle;
@@ -10,6 +9,7 @@ import android.support.v7.app.AppCompatActivity;
 import android.widget.Toast;
 
 import com.jeremyliao.livedatabus.databinding.ActivityLiveDataBusDemoBinding;
+import com.jeremyliao.livedatabus.liveevent.LiveEventObserver;
 
 import java.util.Random;
 import java.util.concurrent.ExecutorService;
@@ -25,10 +25,11 @@ public class LiveDataBusDemo extends AppCompatActivity {
     private ActivityLiveDataBusDemoBinding binding;
     private int sendCount = 0;
     private int receiveCount = 0;
-    private Observer<String> observer = new Observer<String>() {
+    private LiveEventObserver<String> observer = new LiveEventObserver<String>() {
         @Override
-        public void onChanged(@Nullable String s) {
+        public boolean onChanged(@Nullable String s) {
             Toast.makeText(LiveDataBusDemo.this, s, Toast.LENGTH_SHORT).show();
+            return false;
         }
     };
 
@@ -38,42 +39,46 @@ public class LiveDataBusDemo extends AppCompatActivity {
         binding = DataBindingUtil.setContentView(this, R.layout.activity_live_data_bus_demo);
         binding.setHandler(this);
         binding.setLifecycleOwner(this);
-        LiveDataBus.get()
+        LiveEventBus.get()
                 .with("key1", String.class)
-                .observe(this, new Observer<String>() {
+                .observe(this, new LiveEventObserver<String>() {
                     @Override
-                    public void onChanged(@Nullable String s) {
+                    public boolean onChanged(@Nullable String s) {
                         Toast.makeText(LiveDataBusDemo.this, s, Toast.LENGTH_SHORT).show();
+                        return false;
                     }
                 });
-        LiveDataBus.get()
+        LiveEventBus.get()
                 .with("key2", String.class)
                 .observeForever(observer);
-        LiveDataBus.get()
+        LiveEventBus.get()
                 .with("close_all_page", Boolean.class)
-                .observe(this, new Observer<Boolean>() {
+                .observe(this, new LiveEventObserver<Boolean>() {
                     @Override
-                    public void onChanged(@Nullable Boolean b) {
+                    public boolean onChanged(@Nullable Boolean b) {
                         if (b) {
                             finish();
                         }
+                        return false;
                     }
                 });
-        LiveDataBus.get()
+        LiveEventBus.get()
                 .with("multi_thread_count", String.class)
-                .observe(this, new Observer<String>() {
+                .observe(this, new LiveEventObserver<String>() {
                     @Override
-                    public void onChanged(@Nullable String s) {
+                    public boolean onChanged(@Nullable String s) {
                         receiveCount++;
+                        return false;
                     }
                 });
-        LiveDataBus.get()
+        LiveEventBus.get()
                 .with("key_active_level", String.class)
-                .observe(this, new Observer<String>() {
+                .observe(this, new LiveEventObserver<String>() {
                     @Override
-                    public void onChanged(@Nullable String s) {
+                    public boolean onChanged(@Nullable String s) {
                         Toast.makeText(LiveDataBusDemo.this, "Receive message: " + s,
                                 Toast.LENGTH_SHORT).show();
+                        return false;
                     }
                 });
     }
@@ -81,7 +86,7 @@ public class LiveDataBusDemo extends AppCompatActivity {
     @Override
     protected void onDestroy() {
         super.onDestroy();
-        LiveDataBus.get()
+        LiveEventBus.get()
                 .with("key2", String.class)
                 .removeObserver(observer);
     }
@@ -97,7 +102,7 @@ public class LiveDataBusDemo extends AppCompatActivity {
                 .subscribe(new Action1<String>() {
                     @Override
                     public void call(String s) {
-                        LiveDataBus.get().with("key1").setValue(s);
+                        LiveEventBus.get().with("key1").setValue(s);
                     }
                 });
     }
@@ -114,7 +119,7 @@ public class LiveDataBusDemo extends AppCompatActivity {
                 .subscribe(new Action1<String>() {
                     @Override
                     public void call(String s) {
-                        LiveDataBus.get().with("key1").postValue(s);
+                        LiveEventBus.get().with("key1").postValue(s);
                     }
                 });
     }
@@ -130,7 +135,7 @@ public class LiveDataBusDemo extends AppCompatActivity {
                 .subscribe(new Action1<String>() {
                     @Override
                     public void call(String s) {
-                        LiveDataBus.get().with("key2").setValue(s);
+                        LiveEventBus.get().with("key2").setValue(s);
                     }
                 });
     }
@@ -146,7 +151,7 @@ public class LiveDataBusDemo extends AppCompatActivity {
                 .subscribe(new Action1<String>() {
                     @Override
                     public void call(String s) {
-                        LiveDataBus.get().with("sticky_key").setValue(s);
+                        LiveEventBus.get().with("sticky_key").setValue(s);
                     }
                 });
     }
@@ -160,7 +165,7 @@ public class LiveDataBusDemo extends AppCompatActivity {
     }
 
     public void closeAll() {
-        LiveDataBus.get().with("close_all_page").setValue(true);
+        LiveEventBus.get().with("close_all_page").setValue(true);
     }
 
     public void postValueCountTest() {
@@ -172,7 +177,7 @@ public class LiveDataBusDemo extends AppCompatActivity {
             threadPool.execute(new Runnable() {
                 @Override
                 public void run() {
-                    LiveDataBus.get().with("multi_thread_count").postValue("test_data");
+                    LiveEventBus.get().with("multi_thread_count").postValue("test_data");
                 }
             });
         }

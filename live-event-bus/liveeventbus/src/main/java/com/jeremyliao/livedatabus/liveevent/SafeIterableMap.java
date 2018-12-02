@@ -54,34 +54,57 @@ public class SafeIterableMap<K, V> implements Iterable<Map.Entry<K, V>> {
      * If the specified key is not already associated
      * with a value, associates it with the given value.
      *
-     * @param key key with which the specified value is to be associated
-     * @param v   value to be associated with the specified key
+     * @param key      key with which the specified value is to be associated
+     * @param v        value to be associated with the specified key
+     * @param priority sort by priority
      * @return the previous value associated with the specified key,
      * or {@code null} if there was no mapping for the key
      */
-    public V putIfAbsent(@NonNull K key, @NonNull V v) {
+    public V putIfAbsent(@NonNull K key, @NonNull V v, int priority) {
         Entry<K, V> entry = get(key);
         if (entry != null) {
             return entry.mValue;
         }
-        put(key, v);
+        put(key, v, priority);
         return null;
     }
 
-    protected Entry<K, V> put(@NonNull K key, @NonNull V v) {
-        Entry<K, V> newEntry = new Entry<>(key, v);
+    protected Entry<K, V> put(@NonNull K key, @NonNull V v, int priority) {
+        Entry<K, V> newEntry = new Entry<>(key, v, priority);
         mSize++;
+        //说明是首次插入
         if (mEnd == null) {
             mStart = newEntry;
             mEnd = mStart;
             return newEntry;
         }
-
-        mEnd.mNext = newEntry;
-        newEntry.mPrevious = mEnd;
-        mEnd = newEntry;
+        //否则我们需要找到正确的插入位置
+        Entry<K, V> preEntry = null;
+        for (Iterator<Map.Entry<K, V>> iterator = descendingIterator(); iterator.hasNext(); ) {
+            preEntry = (Entry) iterator.next();
+            if (preEntry.mPriority <= priority) {
+                break;
+            }
+        }
+        if (preEntry == mEnd) {
+            //插入到最后一个
+            mEnd.mNext = newEntry;
+            newEntry.mPrevious = mEnd;
+            mEnd = newEntry;
+        } else if (preEntry == null || preEntry == mStart) {
+            //插入到第一个
+            newEntry.mNext = mStart;
+            newEntry.mPrevious = mStart.mPrevious;
+            mStart = newEntry;
+        } else {
+            //插入到中间，不会改变mStart或者mEnd
+            Entry<K, V> tmp = preEntry.mNext;
+            preEntry.mNext = newEntry;
+            newEntry.mPrevious = preEntry;
+            newEntry.mNext = tmp;
+            tmp.mPrevious = newEntry;
+        }
         return newEntry;
-
     }
 
     /**
@@ -213,6 +236,10 @@ public class SafeIterableMap<K, V> implements Iterable<Map.Entry<K, V>> {
         return builder.toString();
     }
 
+    interface SupportRemove<K, V> {
+        void supportRemove(@NonNull Entry<K, V> entry);
+    }
+
     private abstract static class ListIterator<K, V> implements Iterator<Map.Entry<K, V>>,
             SupportRemove<K, V> {
         Entry<K, V> mExpectedEnd;
@@ -296,53 +323,19 @@ public class SafeIterableMap<K, V> implements Iterable<Map.Entry<K, V>> {
         }
     }
 
-    private class IteratorWithAdditions implements Iterator<Map.Entry<K, V>>, SupportRemove<K, V> {
-        private Entry<K, V> mCurrent;
-        private boolean mBeforeStart = true;
-
-        @Override
-        public void supportRemove(@NonNull Entry<K, V> entry) {
-            if (entry == mCurrent) {
-                mCurrent = mCurrent.mPrevious;
-                mBeforeStart = mCurrent == null;
-            }
-        }
-
-        @Override
-        public boolean hasNext() {
-            if (mBeforeStart) {
-                return mStart != null;
-            }
-            return mCurrent != null && mCurrent.mNext != null;
-        }
-
-        @Override
-        public Map.Entry<K, V> next() {
-            if (mBeforeStart) {
-                mBeforeStart = false;
-                mCurrent = mStart;
-            } else {
-                mCurrent = mCurrent != null ? mCurrent.mNext : null;
-            }
-            return mCurrent;
-        }
-    }
-
-    interface SupportRemove<K, V> {
-        void supportRemove(@NonNull Entry<K, V> entry);
-    }
-
     static class Entry<K, V> implements Map.Entry<K, V> {
         @NonNull
         final K mKey;
         @NonNull
         final V mValue;
+        final int mPriority;
         Entry<K, V> mNext;
         Entry<K, V> mPrevious;
 
-        Entry(@NonNull K key, @NonNull V value) {
+        Entry(@NonNull K key, @NonNull V value, int priority) {
             mKey = key;
             this.mValue = value;
+            mPriority = priority;
         }
 
         @NonNull
@@ -377,6 +370,38 @@ public class SafeIterableMap<K, V> implements Iterable<Map.Entry<K, V>> {
             }
             Entry entry = (Entry) obj;
             return mKey.equals(entry.mKey) && mValue.equals(entry.mValue);
+        }
+    }
+
+    private class IteratorWithAdditions implements Iterator<Map.Entry<K, V>>, SupportRemove<K, V> {
+        private Entry<K, V> mCurrent;
+        private boolean mBeforeStart = true;
+
+        @Override
+        public void supportRemove(@NonNull Entry<K, V> entry) {
+            if (entry == mCurrent) {
+                mCurrent = mCurrent.mPrevious;
+                mBeforeStart = mCurrent == null;
+            }
+        }
+
+        @Override
+        public boolean hasNext() {
+            if (mBeforeStart) {
+                return mStart != null;
+            }
+            return mCurrent != null && mCurrent.mNext != null;
+        }
+
+        @Override
+        public Map.Entry<K, V> next() {
+            if (mBeforeStart) {
+                mBeforeStart = false;
+                mCurrent = mStart;
+            } else {
+                mCurrent = mCurrent != null ? mCurrent.mNext : null;
+            }
+            return mCurrent;
         }
     }
 }

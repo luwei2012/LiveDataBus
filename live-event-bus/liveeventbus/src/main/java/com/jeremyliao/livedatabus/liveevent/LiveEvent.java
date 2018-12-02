@@ -19,7 +19,6 @@ package com.jeremyliao.livedatabus.liveevent;
 import android.arch.lifecycle.GenericLifecycleObserver;
 import android.arch.lifecycle.Lifecycle;
 import android.arch.lifecycle.LifecycleOwner;
-import android.arch.lifecycle.Observer;
 import android.support.annotation.MainThread;
 import android.support.annotation.NonNull;
 import android.support.annotation.Nullable;
@@ -33,41 +32,38 @@ import static android.arch.lifecycle.Lifecycle.State.DESTROYED;
 /**
  */
 public abstract class LiveEvent<T> {
-    private final Object mDataLock = new Object();
     static final int START_VERSION = -1;
+    static final int DEFAULT_PRIORITY = 0x10;
     private static final Object NOT_SET = new Object();
-
-    private SafeIterableMap<Observer<T>, ObserverWrapper> mObservers =
+    private SafeIterableMap<LiveEventObserver<T>, ObserverWrapper> mObservers =
             new SafeIterableMap<>();
 
     // how many observers are in active state
     private int mActiveCount = 0;
     private volatile Object mData = NOT_SET;
-    // when setData is called, we set the pending data and actual data swap happens on the main
-    // thread
-    private volatile Object mPendingData = NOT_SET;
-    private int mVersion = START_VERSION;
+    private int mVersion = START_VERSION;//全局的计数器，保证所有的事件id递增
+    // 同时每个事件应该有一个id，所有观察者如果低于这个id表示没有处理过该事件
 
     private boolean mDispatchingValue;
     @SuppressWarnings("FieldCanBeLocal")
     private boolean mDispatchInvalidated;
 
-    private class PostValueTask implements Runnable {
-        private Object newValue;
-
-        public PostValueTask(@NonNull Object newValue) {
-            this.newValue = newValue;
-        }
-
-        @Override
-        public void run() {
-            setValue((T) newValue);
+    private static void assertMainThread(String methodName) {
+        if (!MainThreadManager.getInstance().isMainThread()) {
+            throw new IllegalStateException("Cannot invoke " + methodName + " on a background"
+                    + " thread");
         }
     }
 
-    private void considerNotify(ObserverWrapper observer) {
+    /**
+     * 判断是否应该通知观察者
+     *
+     * @param observer 观察者
+     * @return 观察者是否消费了事件
+     */
+    private boolean considerNotify(ObserverWrapper observer) {
         if (!observer.mActive) {
-            return;
+            return false;
         }
         // Check latest state b4 dispatch. Maybe it changed state but we didn't get the event yet.
         //
@@ -76,16 +72,23 @@ public abstract class LiveEvent<T> {
         // notify for a more predictable notification order.
         if (!observer.shouldBeActive()) {
             observer.activeStateChanged(false);
-            return;
+            return false;
         }
-        if (observer.mLastVersion >= mVersion) {
-            return;
+        if (mData == null || mData == NOT_SET || !(mData instanceof ObjectWrapper)
+                || observer.mLastVersion >= ((ObjectWrapper) mData).getVersion()) {
+            return false;
         }
-        observer.mLastVersion = mVersion;
+
+        observer.mLastVersion = ((ObjectWrapper) mData).getVersion();
         //noinspection unchecked
-        observer.mObserver.onChanged((T) mData);
+        return observer.mObserver.onChanged((T) ((ObjectWrapper) mData).getData());
     }
 
+    /**
+     * 按序遍历，通知所有观察者，如果有观察者消费了事件，遍历会被中断
+     *
+     * @param initiator
+     */
     private void dispatchingValue(@Nullable ObserverWrapper initiator) {
         if (mDispatchingValue) {
             mDispatchInvalidated = true;
@@ -98,10 +101,9 @@ public abstract class LiveEvent<T> {
                 considerNotify(initiator);
                 initiator = null;
             } else {
-                for (Iterator<Map.Entry<Observer<T>, ObserverWrapper>> iterator =
+                for (Iterator<Map.Entry<LiveEventObserver<T>, ObserverWrapper>> iterator =
                      mObservers.iteratorWithAdditions(); iterator.hasNext(); ) {
-                    considerNotify(iterator.next().getValue());
-                    if (mDispatchInvalidated) {
+                    if (considerNotify(iterator.next().getValue()) || mDispatchInvalidated) {
                         break;
                     }
                 }
@@ -139,14 +141,20 @@ public abstract class LiveEvent<T> {
      * @param observer The observer that will receive the events
      */
     @MainThread
-    public void observe(@NonNull LifecycleOwner owner, @NonNull Observer<T> observer) {
+    public void observe(@NonNull LifecycleOwner owner, @NonNull LiveEventObserver<T> observer) {
+        observe(owner, observer, DEFAULT_PRIORITY);
+    }
+
+    @MainThread
+    public void observe(@NonNull LifecycleOwner owner, @NonNull LiveEventObserver<T> observer, int priority) {
         if (owner.getLifecycle().getCurrentState() == DESTROYED) {
             // ignore
             return;
         }
         LifecycleBoundObserver wrapper = new LifecycleBoundObserver(owner, observer);
+        wrapper.mPriority = priority;
         wrapper.mLastVersion = getVersion();
-        ObserverWrapper existing = mObservers.putIfAbsent(observer, wrapper);
+        ObserverWrapper existing = mObservers.putIfAbsent(observer, wrapper, priority);
         if (existing != null && !existing.isAttachedTo(owner)) {
             throw new IllegalArgumentException("Cannot add the same observer"
                     + " with different lifecycles");
@@ -158,13 +166,19 @@ public abstract class LiveEvent<T> {
     }
 
     @MainThread
-    public void observeSticky(@NonNull LifecycleOwner owner, @NonNull Observer<T> observer) {
+    public void observeSticky(@NonNull LifecycleOwner owner, @NonNull LiveEventObserver<T> observer) {
+        observeSticky(owner, observer, DEFAULT_PRIORITY);
+    }
+
+    @MainThread
+    public void observeSticky(@NonNull LifecycleOwner owner, @NonNull LiveEventObserver<T> observer, int priority) {
         if (owner.getLifecycle().getCurrentState() == DESTROYED) {
             // ignore
             return;
         }
         LifecycleBoundObserver wrapper = new LifecycleBoundObserver(owner, observer);
-        ObserverWrapper existing = mObservers.putIfAbsent(observer, wrapper);
+        wrapper.mPriority = priority;
+        ObserverWrapper existing = mObservers.putIfAbsent(observer, wrapper, priority);
         if (existing != null && !existing.isAttachedTo(owner)) {
             throw new IllegalArgumentException("Cannot add the same observer"
                     + " with different lifecycles");
@@ -177,9 +191,9 @@ public abstract class LiveEvent<T> {
 
     /**
      * Adds the given observer to the observers list. This call is similar to
-     * {@link LiveEvent#observe(LifecycleOwner, Observer)} with a LifecycleOwner, which
+     * {@link LiveEvent#observe(LifecycleOwner, LiveEventObserver)} with a LifecycleOwner, which
      * is always active. This means that the given observer will receive all events and will never
-     * be automatically removed. You should manually call {@link #removeObserver(Observer)} to stop
+     * be automatically removed. You should manually call {@link #removeObserver(LiveEventObserver)} to stop
      * observing this LiveData.
      * While LiveData has one of such observers, it will be considered
      * as active.
@@ -190,10 +204,16 @@ public abstract class LiveEvent<T> {
      * @param observer The observer that will receive the events
      */
     @MainThread
-    public void observeForever(@NonNull Observer<T> observer) {
+    public void observeForever(@NonNull LiveEventObserver<T> observer) {
+        observeForever(observer, DEFAULT_PRIORITY);
+    }
+
+    @MainThread
+    public void observeForever(@NonNull LiveEventObserver<T> observer, int priority) {
         AlwaysActiveObserver wrapper = new AlwaysActiveObserver(observer);
         wrapper.mLastVersion = getVersion();
-        ObserverWrapper existing = mObservers.putIfAbsent(observer, wrapper);
+        wrapper.mPriority = priority;
+        ObserverWrapper existing = mObservers.putIfAbsent(observer, wrapper, priority);
         if (existing != null && existing instanceof LiveEvent.LifecycleBoundObserver) {
             throw new IllegalArgumentException("Cannot add the same observer"
                     + " with different lifecycles");
@@ -205,9 +225,15 @@ public abstract class LiveEvent<T> {
     }
 
     @MainThread
-    public void observeStickyForever(@NonNull Observer<T> observer) {
+    public void observeStickyForever(@NonNull LiveEventObserver<T> observer) {
+        observeStickyForever(observer, DEFAULT_PRIORITY);
+    }
+
+    @MainThread
+    public void observeStickyForever(@NonNull LiveEventObserver<T> observer, int priority) {
         AlwaysActiveObserver wrapper = new AlwaysActiveObserver(observer);
-        ObserverWrapper existing = mObservers.putIfAbsent(observer, wrapper);
+        wrapper.mPriority = priority;
+        ObserverWrapper existing = mObservers.putIfAbsent(observer, wrapper, priority);
         if (existing != null && existing instanceof LiveEvent.LifecycleBoundObserver) {
             throw new IllegalArgumentException("Cannot add the same observer"
                     + " with different lifecycles");
@@ -224,7 +250,7 @@ public abstract class LiveEvent<T> {
      * @param observer The Observer to receive events.
      */
     @MainThread
-    public void removeObserver(@NonNull final Observer<T> observer) {
+    public void removeObserver(@NonNull final LiveEventObserver<T> observer) {
         assertMainThread("removeObserver");
         ObserverWrapper removed = mObservers.remove(observer);
         if (removed == null) {
@@ -243,7 +269,7 @@ public abstract class LiveEvent<T> {
     @MainThread
     public void removeObservers(@NonNull final LifecycleOwner owner) {
         assertMainThread("removeObservers");
-        for (Map.Entry<Observer<T>, ObserverWrapper> entry : mObservers) {
+        for (Map.Entry<LiveEventObserver<T>, ObserverWrapper> entry : mObservers) {
             if (entry.getValue().isAttachedTo(owner)) {
                 removeObserver(entry.getKey());
             }
@@ -270,22 +296,6 @@ public abstract class LiveEvent<T> {
     }
 
     /**
-     * Sets the value. If there are active observers, the value will be dispatched to them.
-     * <p>
-     * This method must be called from the main thread. If you need set a value from a background
-     * thread, you can use {@link #postValue(Object)}
-     *
-     * @param value The new value
-     */
-    @MainThread
-    public void setValue(T value) {
-        assertMainThread("setValue");
-        mVersion++;
-        mData = value;
-        dispatchingValue(null);
-    }
-
-    /**
      * Returns the current value.
      * Note that calling this method on a background thread does not guarantee that the latest
      * value set will be received.
@@ -297,9 +307,40 @@ public abstract class LiveEvent<T> {
         Object data = mData;
         if (data != NOT_SET) {
             //noinspection unchecked
-            return (T) data;
+            return (T) ((ObjectWrapper) mData).getData();
         }
         return null;
+    }
+
+    /**
+     * Sets the value. If there are active observers, the value will be dispatched to them.
+     * <p>
+     * This method must be called from the main thread. If you need set a value from a background
+     * thread, you can use {@link #postValue(Object)}
+     *
+     * @param value The new value
+     */
+    @MainThread
+    public void setValue(T value) {
+        assertMainThread("setValue");
+        mVersion++;
+        mData = new ObjectWrapper<>(value, mVersion);
+        dispatchingValue(null);
+    }
+
+    /**
+     * resume the last dispatching. If there are active observers, the value will be dispatched to them.
+     * <p>
+     * This method must be called from the main thread.
+     *
+     * @param value The older value
+     */
+    @MainThread
+    public void resumeDispatch(T value) {
+        assertMainThread("setValue");
+        if (mData != NOT_SET && ((ObjectWrapper) mData).getData() == value) {
+            dispatchingValue(null);
+        }
     }
 
     int getVersion() {
@@ -362,11 +403,24 @@ public abstract class LiveEvent<T> {
         return CREATED;
     }
 
+    private class PostValueTask implements Runnable {
+        private Object newValue;
+
+        public PostValueTask(@NonNull Object newValue) {
+            this.newValue = newValue;
+        }
+
+        @Override
+        public void run() {
+            setValue((T) newValue);
+        }
+    }
+
     class LifecycleBoundObserver extends ObserverWrapper implements GenericLifecycleObserver {
         @NonNull
         final LifecycleOwner mOwner;
 
-        LifecycleBoundObserver(@NonNull LifecycleOwner owner, Observer<T> observer) {
+        LifecycleBoundObserver(@NonNull LifecycleOwner owner, LiveEventObserver<T> observer) {
             super(observer);
             mOwner = owner;
         }
@@ -397,11 +451,12 @@ public abstract class LiveEvent<T> {
     }
 
     private abstract class ObserverWrapper {
-        final Observer<T> mObserver;
+        final LiveEventObserver<T> mObserver;
         boolean mActive;
         int mLastVersion = START_VERSION;
+        int mPriority = DEFAULT_PRIORITY;
 
-        ObserverWrapper(Observer<T> observer) {
+        ObserverWrapper(LiveEventObserver<T> observer) {
             mObserver = observer;
         }
 
@@ -437,7 +492,7 @@ public abstract class LiveEvent<T> {
 
     private class AlwaysActiveObserver extends ObserverWrapper {
 
-        AlwaysActiveObserver(Observer<T> observer) {
+        AlwaysActiveObserver(LiveEventObserver<T> observer) {
             super(observer);
         }
 
@@ -447,10 +502,34 @@ public abstract class LiveEvent<T> {
         }
     }
 
-    private static void assertMainThread(String methodName) {
-        if (!MainThreadManager.getInstance().isMainThread()) {
-            throw new IllegalStateException("Cannot invoke " + methodName + " on a background"
-                    + " thread");
+    private class ObjectWrapper<T> {
+        private T mData;
+        private int mVersion = START_VERSION;
+
+        public ObjectWrapper() {
+        }
+
+        public ObjectWrapper(T mData, int mVersion) {
+            this.mData = mData;
+            this.mVersion = mVersion;
+        }
+
+        public T getData() {
+            return mData;
+        }
+
+        public ObjectWrapper setData(T mData) {
+            this.mData = mData;
+            return this;
+        }
+
+        public int getVersion() {
+            return mVersion;
+        }
+
+        public ObjectWrapper setVersion(int mLastVersion) {
+            this.mVersion = mLastVersion;
+            return this;
         }
     }
 }

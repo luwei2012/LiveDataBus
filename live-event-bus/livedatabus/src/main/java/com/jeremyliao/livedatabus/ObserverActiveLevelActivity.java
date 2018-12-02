@@ -24,6 +24,6 @@ public class ObserverActiveLevelActivity extends AppCompatActivity {
     }
 
     public void sendMsgToPrevent() {
-        LiveDataBus.get().with("key_active_level").postValue("Send Msg To Prevent");
+        LiveEventBus.get().with("key_active_level").postValue("Send Msg To Prevent");
     }
 }

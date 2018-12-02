@@ -24,21 +24,16 @@ import android.support.annotation.Nullable;
  */
 public class MainThreadManager {
 
-    private static class SingletonHolder {
-        private static final MainThreadManager INSTANCE = new MainThreadManager();
+    private final Object mLock = new Object();
+    @Nullable
+    private volatile Handler mMainHandler;
+
+    private MainThreadManager() {
     }
 
     public static MainThreadManager getInstance() {
         return SingletonHolder.INSTANCE;
     }
-
-    private final Object mLock = new Object();
-
-    private MainThreadManager() {
-    }
-
-    @Nullable
-    private volatile Handler mMainHandler;
 
     public void postToMainThread(Runnable runnable) {
         if (mMainHandler == null) {
@@ -54,5 +49,9 @@ public class MainThreadManager {
 
     public boolean isMainThread() {
         return Looper.getMainLooper().getThread() == Thread.currentThread();
+    }
+
+    private static class SingletonHolder {
+        private static final MainThreadManager INSTANCE = new MainThreadManager();
     }
 }
