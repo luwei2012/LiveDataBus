@@ -1,1 +1,1 @@
-include ':livedatabus', ':liveeventbus'
+include ':liveeventbusdemo', ':liveeventbus'
