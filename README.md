@@ -1,31 +1,33 @@
-# LiveDataBus
+# LiveEventBus
 
-### Android消息总线，基于LiveData，具有生命周期感知能力，支持Sticky
+### Android消息总线，Thanks to [JeremyLiao](https://github.com/JeremyLiao/LiveDataBus/blob/master/live-data-bus/livedatabus/src/main/java/com/jeremyliao/livedatabus/LiveDataBus.java)
 
-### 简单之美
-[LiveDataBus](https://github.com/JeremyLiao/LiveDataBus/blob/master/live-data-bus/livedatabus/src/main/java/com/jeremyliao/livedatabus/LiveDataBus.java)的整个实现就一个java文件，不超过150行代码。不需要过于繁杂的功能，简单好用，就是最好的：）
-
-### LiveDataBus不同的实现
-LiveDataBus目前有两种实现：
-- [**live-data-bus**](https://github.com/JeremyLiao/LiveDataBus/tree/master/live-data-bus)
-采用继承LiveData的方式实现，整个实现就一个java文件
-- [**live-event-bus**](https://github.com/JeremyLiao/LiveDataBus/tree/master/live-event-bus) 由于live-data-bus的实现存在发送给Stop状态Observer消息无法及时收到的问题，这个问题采用继承LiveData的方式无法解决，所以把LiveData源码拷贝并命名成LiveEvent类，直接修改解决，并且也解决了live-data-bus需要hook的问题
+### 与LiveDataBus的不同
+1.废弃了LiveDataBus，完全抛弃了LiveData的相关依赖，只保留了对LifeCycle的核心依赖
+2.给观察者添加了权重，值越低优先级越高，0表示最高优先级。默认给每个观察者的权重为16，0~15预留给系统级观察者。用一优先级的观察者采用FIFO的原则，先注册，先通知。
+3.事件可被消费，被消费后其他观察者无法收到通知。你可以在消费后再次恢复事件，继续通知其他未收到事件的观察者。
+4.针对同一类型的事件，在3的情况下，新事件会覆盖旧事件，导致旧事件无法re-dispatching。
 
 ### 主要功能Commit记录
-1. 主要功能完成（Jul 11, 2018）
-2. 支持Sticky（Aug 8, 2018）
-3. 修复在后台线程PostValue会丢失消息的问题（Aug 9, 2018）
-4. 新建分支live-event，解决发送给Stop状态Observer消息无法及时收到的问题（Aug 18, 2018）
-5. 两种实现合并到master分支（Sep 26, 2018）
+1. 在LiveDataBus的基础上扩展功能2和3
 
 ## 如何使用本项目
-
-- Fork本项目
-- 使用**live-data-bus**的LiveDataBus实现可以直接使用源码：[LiveDataBus.java](https://github.com/JeremyLiao/LiveDataBus/blob/master/live-data-bus/livedatabus/src/main/java/com/jeremyliao/livedatabus/LiveDataBus.java)，依赖Android Architecture Components的LiveData组件
-- 使用**live-event-bus**的LiveDataBus实现也依赖Android Architecture Components的LiveData组件，并且需要在build.gradle中引用JCenter库：
-
+Step 1. Add the JitPack repository to your build file
+Add it in your root build.gradle at the end of repositories:
 ```
-implementation 'com.jeremyliao:live-event-bus:0.0.1'
+	allprojects {
+		repositories {
+			...
+			maven { url 'https://jitpack.io' }
+		}
+	}
+```
+
+Step 2. Add the dependency
+```
+	dependencies {
+		implementation 'com.github.luwei2012:LiveEventBus:1.0.0'
+	}
 ```
 
 ## 调用方式
@@ -35,7 +37,7 @@ implementation 'com.jeremyliao:live-event-bus:0.0.1'
 生命周期感知，不需要手动取消订阅
 
 ```java
-LiveDataBus.get()
+LiveEventBus.get()
 	.with("key_name", String.class)
 	.observe(this, new Observer<String>() {
 	    @Override
@@ -48,13 +50,13 @@ LiveDataBus.get()
 需要手动取消订阅
 
 ```java
-LiveDataBus.get()
+LiveEventBus.get()
 	.with("key_name", String.class)
 	.observeForever(observer);
 ```
 
 ```java
-LiveDataBus.get()
+LiveEventBus.get()
 	.with("key_name", String.class)
 	.removeObserver(observer);
 ```
@@ -63,12 +65,12 @@ LiveDataBus.get()
 - **setValue**
 在主线程发送消息
 ```java
-LiveDataBus.get().with("key_name").setValue(value);
+LiveEventBus.get().with("key_name").setValue(value);
 ```
 - **postValue**
 在后台线程发送消息，订阅者会在主线程收到消息
 ```java
-LiveDataBus.get().with("key_name").postValue(value);
+LiveEventBus.get().with("key_name").postValue(value);
 ```
 #### Sticky模式
 支持在注册订阅者的时候设置Sticky模式，这样订阅者可以接收到订阅之前发送的消息
@@ -77,7 +79,7 @@ LiveDataBus.get().with("key_name").postValue(value);
 生命周期感知，不需要手动取消订阅，Sticky模式
 
 ```java
-LiveDataBus.get()
+LiveEventBus.get()
         .with("sticky_key", String.class)
         .observeSticky(this, new Observer<String>() {
             @Override
@@ -90,48 +92,34 @@ LiveDataBus.get()
 需要手动取消订阅，Sticky模式
 
 ```java
-LiveDataBus.get()
+LiveEventBus.get()
         .with("sticky_key", String.class)
         .observeStickyForever(observer);
 ```
 
 ```java
-LiveDataBus.get()
+LiveEventBus.get()
         .with("sticky_key", String.class)
         .removeObserver(observer);
 ```
 
+- **resumeDispatch**
+只有在事件被消费后、新的事件产生前调用有用，会继续通知其他观察者
+
+```java
+LiveEventBus.get()
+        .with("key_name", String.class)
+        .resumeDispatch("value");
+```
+
 ## 示例和DEMO
 
-##### 基本功能
-![基本功能](https://github.com/JeremyLiao/LiveDataBus/blob/master/images/img1.gif)
-
-##### Sticky模式
-![sticky](https://github.com/JeremyLiao/LiveDataBus/blob/master/images/img2.gif)
-
-##### 一个简单的应用，发消息关闭所有activity
-![close all](https://github.com/JeremyLiao/LiveDataBus/blob/master/images/img3.gif)
-
-##### [**live-event-bus**](https://github.com/JeremyLiao/LiveDataBus/tree/master/live-event-bus),解决了发送给Stop状态Observer消息无法及时收到的问题
-![close all](https://github.com/JeremyLiao/LiveDataBus/blob/master/images/img4.gif)
-![close all](https://github.com/JeremyLiao/LiveDataBus/blob/master/images/img5.gif)
+##### 事件消费+re-dispatching
+![基本功能](https://github.com/luwei2012/LiveEventBus/tree/master/images/img1.gif)
+ 
 
 
-## 文档
-#### LiveDataBus实现原理
-LiveDataBus的实现原理可参见作者在美团技术博客上的博文：
-[Android消息总线的演进之路：用LiveDataBus替代RxBus、EventBus](https://tech.meituan.com/Android_LiveDataBus.html)
 
-## 其他
-- 欢迎提Issue与作者交流
-- 欢迎提Pull request，帮助 fix bug，增加新的feature，让LiveDataBus变得更强大、更好用
 
-## More Open Source by JeremyLiao
 
-1. [FastSharedPreferences](https://github.com/JeremyLiao/FastSharedPreferences) 一个Android平台的高性能key-value组件
-2. [tensorflow-lite-sdk](https://github.com/JeremyLiao/tensorflow-lite-sdk) 一个更加通用的Tensorflow-Lite Android SDK
-3. [android-modular](https://github.com/JeremyLiao/android-modular) 一个组件化的实施方案
-4. [MessageBus](https://github.com/JeremyLiao/MessageBus) 一个android平台的基于订阅-发布模式的消息框架，支持跨进程消息通信
-5. [persistence](https://github.com/JeremyLiao/persistence) 一个android平台的key-value storage framework
-6. [LightRxAndroid](https://github.com/JeremyLiao/LightRxAndroid) 另辟蹊径，利用Android Handler实现了一个类似RxJava的链式框架
-7. [rxjava-retry](https://github.com/JeremyLiao/rxjava-retry) 封装了几个处理RxJava Retry操作的类
+

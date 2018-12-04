@@ -16,7 +16,7 @@ import java.util.Map;
 
 public final class LiveEventBus {
 
-    private final Map<String, BusLiveEvent<Object>> bus;
+    private final Map<Object, BusLiveEvent<Object>> bus;
 
     private LiveEventBus() {
         bus = new HashMap<>();
@@ -26,14 +26,14 @@ public final class LiveEventBus {
         return SingletonHolder.DEFAULT_BUS;
     }
 
-    public synchronized <T> Observable<T> with(String key, Class<T> type) {
+    public synchronized <T> Observable<T> with(Object key, Class<T> type) {
         if (!bus.containsKey(key)) {
             bus.put(key, new BusLiveEvent<>());
         }
         return (Observable<T>) bus.get(key);
     }
 
-    public Observable<Object> with(String key) {
+    public Observable<Object> with(Object key) {
         return with(key, Object.class);
     }
 
