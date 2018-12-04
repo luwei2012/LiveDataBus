@@ -115,8 +115,7 @@ LiveEventBus.get()
 ## 示例和DEMO
 
 ##### 事件消费+re-dispatching
-![基本功能](https://github.com/luwei2012/LiveEventBus/tree/master/images/img1.gif)
- 
+![事件消费](https://github.com/luwei2012/LiveEventBus/blob/master/images/img1.gif) 
 
 
 
